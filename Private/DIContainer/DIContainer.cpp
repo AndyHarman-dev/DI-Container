@@ -3,48 +3,26 @@
 
 #include "DIContainer/DIContainer.h"
 
+#include "UELoggingModule/Public/ValidateMacro.h"
+
 DEFINE_LOG_CATEGORY_STATIC(LogDIContainer, Log, All);
 
-void UDIContainer::Register(UObject* InInstance, const TSubclassOf<UObject> InClass)
+void UDIContainer::Register(FHashableClassAndNameKey Key, UObject* InInstance)
 {
-	if (!IsValid(InInstance) || !IsValid(InClass))
+	if (!ValidateMsfg(Key.IsValid() && IsValid(InInstance), LogDIContainer, "InInstance or InClass is not valid"))
 	{
-		UE_LOG(LogDIContainer, Error, TEXT("Register: InInstance or InClass is not valid"));
 		return;
 	}
 
-	const bool bImplementsInterfaceOrIsA =
-		InClass->HasAnyClassFlags(CLASS_Interface) ?
-	InInstance->GetClass()->ImplementsInterface(InClass) :
-	InInstance->IsA(InClass);
-	
-	if (!bImplementsInterfaceOrIsA)
+	if (!ValidateMsfg(IsInstanceChildOfOrImplementsInterface(InInstance, Key.Class), LogDIContainer, "Instance is not implemented base type %s", *Key.Class->GetName()))
 	{
-		UE_LOG(LogDIContainer, Error, TEXT("Register: Instance is not implemented base type %s"), *(InClass->GetName()));
 		return;
 	}
 
-	RegisterInternal(InInstance, InClass);
+	RegisterInternal(MoveTemp(Key), InInstance);
 }
 
-void UDIContainer::RegisterWithNameId(UObject* InInstance, TSubclassOf<UObject> InClass, const FName& InUniqueId)
-{
-	if (!IsValid(InInstance) || !IsValid(InClass))
-	{
-		UE_LOG(LogDIContainer, Error, TEXT("Register: InInstance or InClass is not valid"));
-		return;
-	}
-
-	if (!InInstance->IsA(InClass))
-	{
-		UE_LOG(LogDIContainer, Error, TEXT("Register: Instance is not implemented base type %s"), *(InClass->GetName()));
-		return;
-	}
-
-	RegisterInternal(InInstance, InClass, InUniqueId);
-}
-
-void UDIContainer::Unregister(UObject* InInstance)
+void UDIContainer::UnregisterByInstance(UObject* InInstance)
 {
 	for (auto Iter = Instances.CreateIterator(); Iter; ++Iter)
 	{
@@ -56,53 +34,53 @@ void UDIContainer::Unregister(UObject* InInstance)
 	}
 }
 
-UObject* UDIContainer::Resolve(const TSubclassOf<UObject> InClass)
+void UDIContainer::UnregisterByKey(FHashableClassAndNameKey Key)
 {
-	if (!IsValid(InClass))
+	if (!ValidateMsfg(Instances.Contains(Key), LogDIContainer, "Instance of type %s is not registerd", *(Key.Class->GetName())))
 	{
-		UE_LOG(LogDIContainer, Error, TEXT("Resolve: InClass is not valid"));
-		return nullptr;
-	}
- 
-	return ResolveInternal(InClass);
-}
-
-UObject* UDIContainer::ResolveWithNameId(TSubclassOf<UObject> InClass, const FName& InUniqueId)
-{
-	if (!IsValid(InClass))
-	{
-		UE_LOG(LogDIContainer, Error, TEXT("Resolve: InClass is not valid"));
-		return nullptr;
-	}
- 
-	return ResolveInternal(InClass, InUniqueId);
-}
-
-void UDIContainer::RegisterInternal(UObject* InInstance, UClass* InClass, const FName& InUniqueId)
-{
-	if (!IsValid(InInstance))
-	{
-		UE_LOG(LogDIContainer, Error, TEXT("Register: Instance is not valid when attempt to register %s"), *(InClass->GetName()));
 		return;
 	}
 
-	if (Instances.Contains(FHashableClassAndNameKey(InClass, InUniqueId)))
+	Instances.Remove(Key);
+}
+
+UObject* UDIContainer::Resolve(FHashableClassAndNameKey Key)
+{
+	if (!ValidateMsfg(Key.IsValid(), LogDIContainer, "InClass is not valid"))
 	{
-		UE_LOG(LogDIContainer, Error, TEXT("Register: Instance of type %s is already registerd"), *(InClass->GetName()));
+		return nullptr;
+	}
+ 
+	return ResolveInternal(Key);
+}
+
+void UDIContainer::RegisterInternal(FHashableClassAndNameKey&& Key, UObject* InInstance)
+{
+	if (!ValidateMsfg(IsValid(InInstance), LogDIContainer, "InInstance is not valid when attempt to register %s", *(Key.Class->GetName())))
+	{
 		return;
 	}
 
-	Instances.Add(FHashableClassAndNameKey(InClass, InUniqueId), InInstance);
+	if (Instances.Contains(Key))
+	{
+		UE_LOG(LogDIContainer, Warning, TEXT("Instance of type %s is already registerd"), *(Key.Class->GetName()));
+		return;
+	}
+
+	Instances.Add(MoveTemp(Key), InInstance);
 }
 
-UObject* UDIContainer::ResolveInternal(UClass* InClass, const FName& InUniqueId)
+UObject* UDIContainer::ResolveInternal(const FHashableClassAndNameKey& Key)
 {
-	FHashableClassAndNameKey Key(InClass, InUniqueId);
-	if (!Instances.Contains(Key))
+	if (!ValidateMsfg(Instances.Contains(Key), LogDIContainer, "Instance of type %s is not registerd", *(Key.Class->GetName())))
 	{
-		UE_LOG(LogDIContainer, Error, TEXT("Resolve: Instance of type %s is not registerd"), *(InClass->GetName()));
 		return nullptr;
 	}
 
 	return Instances[Key];
+}
+
+bool UDIContainer::IsInstanceChildOfOrImplementsInterface(UObject* InInstance, UClass* Class)
+{
+	return Class->HasAnyClassFlags(CLASS_Interface) ? InInstance->GetClass()->ImplementsInterface(Class) : InInstance->IsA(Class);
 }
