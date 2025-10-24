@@ -18,7 +18,7 @@ public class DIContainerModule : ModuleRules
             {
                 "CoreUObject",
                 "Engine",
-                "UELoggingModule"
+                "UELoggingModule", "AutomationTestHelpers"
             }
         );
     }
